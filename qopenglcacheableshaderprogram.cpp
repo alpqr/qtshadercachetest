@@ -95,8 +95,9 @@ QOpenGLProgramBinarySupportCheck::QOpenGLProgramBinarySupportCheck()
 Q_GLOBAL_STATIC(QOpenGLProgramBinaryCache, qt_gl_program_binary_cache)
 Q_GLOBAL_STATIC(QOpenGLProgramBinarySupportCheck, qt_gl_program_binary_support_check)
     
-struct QOpenGLCacheableShaderProgramPrivate
+class QOpenGLCacheableShaderProgramPrivate
 {
+public:
     QOpenGLCacheableShaderProgramPrivate(QOpenGLCacheableShaderProgram *q) : q(q) { }
 
     QOpenGLCacheableShaderProgram *q;
@@ -104,7 +105,7 @@ struct QOpenGLCacheableShaderProgramPrivate
 
     bool isCacheDisabled() { return !qt_gl_program_binary_support_check()->isSupported(); }
 
-    bool compileCacheable(const QByteArray &cacheKey);
+    bool compileCacheable();
 };
 
 QOpenGLCacheableShaderProgram::QOpenGLCacheableShaderProgram(QObject *parent)
@@ -170,11 +171,13 @@ bool QOpenGLCacheableShaderProgram::addCacheableShaderFromSourceFile(QOpenGLShad
 bool QOpenGLCacheableShaderProgram::link()
 {
     qCDebug(DBG_SHADER_CACHE, "link() program %u", programId());
+    bool needsSave = false;
+    QByteArray cacheKey;
     if (!d->program.shaders.isEmpty()) {
         QCryptographicHash keyBuilder(QCryptographicHash::Sha1);
         for (const QOpenGLProgramBinaryCache::ShaderDesc &shader : qAsConst(d->program.shaders))
             keyBuilder.addData(shader.source);
-        const QByteArray cacheKey = keyBuilder.result().toHex();
+        cacheKey = keyBuilder.result().toHex();
         if (DBG_SHADER_CACHE().isEnabled(QtDebugMsg))
             qCDebug(DBG_SHADER_CACHE, "program with %d shaders, cache key %s",
                     d->program.shaders.count(), cacheKey.constData());
@@ -182,22 +185,30 @@ bool QOpenGLCacheableShaderProgram::link()
             qCDebug(DBG_SHADER_CACHE, "Program binary received from cache");
             if (!QOpenGLShaderProgram::link()) {
                 qCDebug(DBG_SHADER_CACHE, "Link failed after glProgramBinary; compiling from scratch");
-                if (!d->compileCacheable(cacheKey))
+                if (d->compileCacheable())
+                    needsSave = true;
+                else
                     return false;
             }
         } else {
             qCDebug(DBG_SHADER_CACHE, "Program binary not in cache, compiling");
-            if (!d->compileCacheable(cacheKey))
+            if (d->compileCacheable())
+                needsSave = true;
+            else
                 return false;
         }
     } else {
         qCDebug(DBG_SHADER_CACHE, "Not a binary-based program");
     }
 
-    return QOpenGLShaderProgram::link();
+    bool ok = QOpenGLShaderProgram::link();
+    if (ok && needsSave)
+        qt_gl_program_binary_cache()->save(cacheKey, programId());
+
+    return ok;
 }
 
-bool QOpenGLCacheableShaderProgramPrivate::compileCacheable(const QByteArray &cacheKey)
+bool QOpenGLCacheableShaderProgramPrivate::compileCacheable()
 {
     for (const QOpenGLProgramBinaryCache::ShaderDesc &shader : qAsConst(program.shaders)) {
         QOpenGLShader *s = new QOpenGLShader(shader.type, q);
@@ -208,7 +219,6 @@ bool QOpenGLCacheableShaderProgramPrivate::compileCacheable(const QByteArray &ca
         }
         q->addShader(s);
     }
-    qt_gl_program_binary_cache()->save(cacheKey, q->programId());
     return true;
 }
 
