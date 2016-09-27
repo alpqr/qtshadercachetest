@@ -76,12 +76,14 @@ QOpenGLProgramBinarySupportCheck::QOpenGLProgramBinarySupportCheck()
             } else {
                 const bool hasExt = ctx->hasExtension("GL_ARB_get_program_binary");
                 qCDebug(DBG_SHADER_CACHE, "GL_ARB_get_program_binary support = %d", hasExt);
-                if (hasExt) {
-                    GLint fmtCount = 0;
-                    ctx->functions()->glGetIntegerv(GL_NUM_PROGRAM_BINARY_FORMATS, &fmtCount);
-                    qCDebug(DBG_SHADER_CACHE, "Supported binary format count = %d", fmtCount);
-                    m_supported = fmtCount > 0;
-                }
+                if (hasExt)
+                    m_supported = true;
+            }
+            if (m_supported) {
+                GLint fmtCount = 0;
+                ctx->functions()->glGetIntegerv(GL_NUM_PROGRAM_BINARY_FORMATS, &fmtCount);
+                qCDebug(DBG_SHADER_CACHE, "Supported binary format count = %d", fmtCount);
+                m_supported = fmtCount > 0;
             }
         }
         qCDebug(DBG_SHADER_CACHE, "Shader cache supported = %d", m_supported);
