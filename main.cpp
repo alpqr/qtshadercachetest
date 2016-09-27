@@ -3,13 +3,19 @@
 #include <QPainter>
 #include <QOpenGLFunctions>
 #include <QOpenGLBuffer>
+#include <QDateTime>
+#include <QElapsedTimer>
 #include "qopenglcacheableshaderprogram.h"
+
+static const int COUNT = 100;
+bool DIFF = false;
 
 static const char *vsrc =
     "attribute highp vec4 posAttr;\n"
     "attribute lowp vec4 colAttr;\n"
     "varying lowp vec4 col;\n"
     "uniform highp mat4 matrix;\n"
+    "//$$\n"
     "void main() {\n"
     "   col = colAttr;\n"
     "   gl_Position = matrix * posAttr;\n"
@@ -40,25 +46,40 @@ public:
     }
     ~Window() {
         makeCurrent();
-        delete m_program;
+        qDeleteAll(m_programs);
     }
 
-    QOpenGLCacheableShaderProgram *m_program = nullptr;
+    QVector<QOpenGLCacheableShaderProgram *> m_programs;
     int m_posAttr, m_colAttr, m_matrixUniform;
     QOpenGLBuffer m_vbo;
+    QElapsedTimer initToFirstFrameTimer;
+    bool m_first = true;
 
     void initializeGL() {
-        m_program = new QOpenGLCacheableShaderProgram;
+        initToFirstFrameTimer.start();
 
-        m_program->addCacheableShaderFromSourceCode(QOpenGLShader::Vertex, vsrc);
-        m_program->addCacheableShaderFromSourceCode(QOpenGLShader::Fragment, fsrc);
+        qint64 ts = 0;
+        if (DIFF) {
+            QDateTime dt = QDateTime::currentDateTime();
+            ts = dt.toMSecsSinceEpoch();
+        }
+        for (int i = 0; i < COUNT; ++i) {
+            QOpenGLCacheableShaderProgram *prog = new QOpenGLCacheableShaderProgram;
+            QByteArray vs(vsrc);
+            QString s("uniform highp float f%1;");
+            s = s.arg(ts + i);
+            vs.replace("//$$", s.toLatin1());
+            prog->addCacheableShaderFromSourceCode(QOpenGLShader::Vertex, vs);
+            prog->addCacheableShaderFromSourceCode(QOpenGLShader::Fragment, fsrc);
+            if (!prog->link())
+                qFatal("link failed");
+            m_programs.append(prog);
+        }
 
-        if (!m_program->link())
-            qFatal("link failed");
-
-        m_posAttr = m_program->attributeLocation("posAttr");
-        m_colAttr = m_program->attributeLocation("colAttr");
-        m_matrixUniform = m_program->uniformLocation("matrix");
+        QOpenGLCacheableShaderProgram *prog = m_programs[0];
+        m_posAttr = prog->attributeLocation("posAttr");
+        m_colAttr = prog->attributeLocation("colAttr");
+        m_matrixUniform = prog->uniformLocation("matrix");
 
         m_vbo.create();
         m_vbo.bind();
@@ -70,32 +91,38 @@ public:
     void paintGL() override {
         QOpenGLFunctions *f = context()->functions();
         f->glClear(GL_COLOR_BUFFER_BIT);
-        QPainter p(this);
-        p.setPen(Qt::red);
-        p.drawText(50, 50, "Hello World");
-        p.end();
+        // QPainter p(this);
+        // p.setPen(Qt::red);
+        // p.drawText(50, 50, "Hello World");
+        // p.end();
 
-        m_program->bind();
+        QOpenGLCacheableShaderProgram *prog = m_programs[0];
+        prog->bind();
         QMatrix4x4 matrix;
         matrix.perspective(60.0f, 4.0f / 3.0f, 0.1f, 100.0f);
         matrix.translate(0.0f, 0.0f, -2.0f);
         matrix.rotate(20.0f, 0.0f, 1.0f, 0.0f);
-        m_program->setUniformValue(m_matrixUniform, matrix);
+        prog->setUniformValue(m_matrixUniform, matrix);
 
         m_vbo.bind();
-        m_program->setAttributeBuffer(m_posAttr, GL_FLOAT, 0, 2);
-        m_program->setAttributeBuffer(m_colAttr, GL_FLOAT, sizeof(vertices), 3);
-        m_program->enableAttributeArray(m_posAttr);
-        m_program->enableAttributeArray(m_colAttr);
+        prog->setAttributeBuffer(m_posAttr, GL_FLOAT, 0, 2);
+        prog->setAttributeBuffer(m_colAttr, GL_FLOAT, sizeof(vertices), 3);
+        prog->enableAttributeArray(m_posAttr);
+        prog->enableAttributeArray(m_colAttr);
         m_vbo.release();
 
         f->glDrawArrays(GL_TRIANGLES, 0, 3);
+
+        if (m_first) {
+            m_first = false;
+            qDebug("\n\n%lld ms\n\n", initToFirstFrameTimer.elapsed());
+        }
     }
 };
 
 int main(int argc, char **argv)
 {
-    qputenv("QT_LOGGING_RULES", "qt.opengl.*=true");
+    //qputenv("QT_LOGGING_RULES", "qt.opengl.*=true");
 
     // QSurfaceFormat fmt;
     // fmt.setVersion(4, 1);
@@ -103,6 +130,11 @@ int main(int argc, char **argv)
     // QSurfaceFormat::setDefaultFormat(fmt);
 
     QGuiApplication app(argc, argv);
+    const QStringList args = app.arguments();
+    for (int i = 0; i < args.count(); ++i)
+        if (args[i] == QStringLiteral("--recompile"))
+            DIFF = true;
+
     Window w;
     w.resize(1024, 768);
     w.show();
