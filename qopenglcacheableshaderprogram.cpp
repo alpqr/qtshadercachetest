@@ -44,7 +44,7 @@
 #include <QCryptographicHash>
 #include <QCoreApplication>
 #include <QOpenGLExtraFunctions>
-#include <QOpenGLContext>
+#include <QtGui/private/qopenglcontext_p.h>
 
 QT_BEGIN_NAMESPACE
 
@@ -54,17 +54,27 @@ QT_BEGIN_NAMESPACE
 
 Q_LOGGING_CATEGORY(DBG_SHADER_CACHE, "qt.opengl.diskcache")
 
-struct QOpenGLProgramBinarySupportCheck
+// While unlikely, one application can in theory use contexts with different versions
+// or profiles. Therefore any version- or extension-specific checks must be done on a
+// per-context basis, not just once per process. QOpenGLSharedResource enables this,
+// although it's once-per-sharing-context-group, not per-context. Still, this should
+// be good enough in practice.
+class QOpenGLProgramBinarySupportCheck : public QOpenGLSharedResource
 {
-    QOpenGLProgramBinarySupportCheck();
+public:
+    QOpenGLProgramBinarySupportCheck(QOpenGLContext *context);
+    void invalidateResource() override { }
+    void freeResource(QOpenGLContext *) override { }
+
     bool isSupported() const { return m_supported; }
 
 private:
     bool m_supported;
 };
 
-QOpenGLProgramBinarySupportCheck::QOpenGLProgramBinarySupportCheck() // ### this should be a once-per-context check, not once-per-process
-    : m_supported(false)
+QOpenGLProgramBinarySupportCheck::QOpenGLProgramBinarySupportCheck(QOpenGLContext *context)
+    : QOpenGLSharedResource(context->shareGroup()),
+      m_supported(false)
 {
     if (qEnvironmentVariableIntValue("QT_DISABLE_SHADER_CACHE") == 0) {
         QOpenGLContext *ctx = QOpenGLContext::currentContext();
@@ -92,9 +102,22 @@ QOpenGLProgramBinarySupportCheck::QOpenGLProgramBinarySupportCheck() // ### this
     }
 }
 
+class QOpenGLProgramBinarySupportCheckWrapper
+{
+public:
+    QOpenGLProgramBinarySupportCheck *get(QOpenGLContext *context)
+    {
+        return m_resource.value<QOpenGLProgramBinarySupportCheck>(context);
+    }
+
+private:
+    QOpenGLMultiGroupSharedResource m_resource;
+};
+
+Q_GLOBAL_STATIC(QOpenGLProgramBinarySupportCheckWrapper, qt_gl_program_binary_support_check)
+
 Q_GLOBAL_STATIC(QOpenGLProgramBinaryCache, qt_gl_program_binary_cache)
-Q_GLOBAL_STATIC(QOpenGLProgramBinarySupportCheck, qt_gl_program_binary_support_check)
-    
+
 class QOpenGLCacheableShaderProgramPrivate
 {
 public:
@@ -103,7 +126,10 @@ public:
     QOpenGLCacheableShaderProgram *q;
     QOpenGLProgramBinaryCache::ProgramDesc program;
 
-    bool isCacheDisabled() { return !qt_gl_program_binary_support_check()->isSupported(); }
+    bool isCacheDisabled()
+    {
+        return !qt_gl_program_binary_support_check()->get(QOpenGLContext::currentContext())->isSupported();
+    }
 
     bool compileCacheable();
 };
