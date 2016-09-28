@@ -193,8 +193,7 @@ bool QOpenGLProgramBinaryCache::load(const QByteArray &cacheKey, uint programId)
     QFile f(fn);
     if (!f.open(QIODevice::ReadOnly))
         return false;
-    buf = f.readAll();
-    f.close();
+    buf = f.read(HEADER_SIZE);
 #endif
 
     if (!verifyHeader(buf)) {
@@ -210,7 +209,8 @@ bool QOpenGLProgramBinaryCache::load(const QByteArray &cacheKey, uint programId)
     }
     p = reinterpret_cast<const quint32 *>(static_cast<const char *>(fdw.ptr) + HEADER_SIZE);
 #else
-    p = reinterpret_cast<const quint32 *>(buf.constData() + HEADER_SIZE);
+    buf = f.readAll();
+    p = reinterpret_cast<const quint32 *>(buf.constData());
 #endif
 
     BinCacheCommon b;

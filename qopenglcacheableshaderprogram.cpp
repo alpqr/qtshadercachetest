@@ -63,7 +63,7 @@ private:
     bool m_supported;
 };
 
-QOpenGLProgramBinarySupportCheck::QOpenGLProgramBinarySupportCheck()
+QOpenGLProgramBinarySupportCheck::QOpenGLProgramBinarySupportCheck() // ### this should be a once-per-context check, not once-per-process
     : m_supported(false)
 {
     if (qEnvironmentVariableIntValue("QT_DISABLE_SHADER_CACHE") == 0) {
