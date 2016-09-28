@@ -125,6 +125,17 @@ bool QOpenGLProgramBinaryCache::verifyHeader(const QByteArray &buf) const
     return true;
 }
 
+bool QOpenGLProgramBinaryCache::setProgramBinary(uint programId, uint blobFormat, const void *p, uint blobSize)
+{
+    QOpenGLExtraFunctions *funcs = QOpenGLContext::currentContext()->extraFunctions();
+    funcs->glGetError();
+    funcs->glProgramBinary(programId, blobFormat, p, blobSize);
+    int err = funcs->glGetError();
+    qCDebug(DBG_SHADER_CACHE, "Program binary set for program %u, size %d, format 0x%x, err = 0x%x",
+            programId, blobSize, blobFormat, err);
+    return err == 0;
+}
+
 #ifdef Q_OS_UNIX
 class FdWrapper
 {
@@ -178,6 +189,11 @@ public:
 
 bool QOpenGLProgramBinaryCache::load(const QByteArray &cacheKey, uint programId)
 {
+    if (m_memCache.contains(cacheKey)) {
+        const MemCacheEntry *e = m_memCache[cacheKey];
+        return setProgramBinary(programId, e->format, e->blob.constData(), e->blob.count());
+    }
+
     QByteArray buf;
     const QString fn = cacheFileName(cacheKey);
     DeferredFileRemove undertaker(fn);
@@ -243,14 +259,11 @@ bool QOpenGLProgramBinaryCache::load(const QByteArray &cacheKey, uint programId)
     quint32 blobFormat = *p++;
     quint32 blobSize = *p++;
 
-    QOpenGLExtraFunctions *funcs = QOpenGLContext::currentContext()->extraFunctions();
-    funcs->glGetError();
-    funcs->glProgramBinary(programId, blobFormat, p, blobSize);
-    int err = funcs->glGetError();
-    qCDebug(DBG_SHADER_CACHE, "Program binary set for program %u, size %d, format 0x%x, err = 0x%x",
-            programId, blobSize, blobFormat, err);
+    const bool ok = setProgramBinary(programId, blobFormat, p, blobSize);
+    if (ok)
+        m_memCache.insert(cacheKey, new MemCacheEntry(p, blobSize, blobFormat));
 
-    return err == 0;
+    return ok;
 }
 
 void QOpenGLProgramBinaryCache::save(const QByteArray &cacheKey, uint programId)

@@ -42,6 +42,7 @@
 
 #include <QtGui/qtguiglobal.h>
 #include <QtGui/qopenglshaderprogram.h>
+#include <QtCore/qcache.h>
 
 QT_BEGIN_NAMESPACE
 
@@ -64,9 +65,19 @@ public:
 private:
     QString cacheFileName(const QByteArray &cacheKey) const;
     bool verifyHeader(const QByteArray &buf) const;
+    bool setProgramBinary(uint programId, uint blobFormat, const void *p, uint blobSize);
 
     QString m_cacheDir;
     bool m_cacheWritable;
+    struct MemCacheEntry {
+        MemCacheEntry(const void *p, int size, uint format)
+          : blob(reinterpret_cast<const char *>(p), size),
+            format(format)
+        { }
+        QByteArray blob;
+        uint format;
+    };
+    QCache<QByteArray, MemCacheEntry> m_memCache;
 };
 
 QT_END_NAMESPACE
