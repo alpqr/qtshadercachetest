@@ -28,24 +28,32 @@ efficient caching yet.
 
 Some results:
 
-Mesa: not supported. Even though GL_ARB_get_program_binary is advertised /
-OpenGL ES 3.0 is supported, the number of supported binary formats is 0. So no
-speedup here.
-
-i.MX6, Linux (Vivante GC2000, driver v5.0.11)
+** i.MX6, Linux ** (Vivante GC2000, driver v5.0.11)
 
 10 shaders - standard compilation 192 ms - subsequent runs with Qt's disk cache 41 ms (4.6x speedup)
 
 100 shaders - standard compilation 1634 ms - subsequent runs with Qt's disk cache 95 ms (17.2x speedup)
 
-AMD Radeon on Windows (latest stable Crimson, no driver-provided cache by default?)
+** AMD Radeon on Windows ** (latest stable Crimson, no driver-provided cache by default?)
 
 10 shaders - standard compilation 118 ms - subsequent runs with Qt's disk cache 16 ms (7.3x speedup)
 
 100 shaders - standard compilation 782 ms - subsequent runs with Qt's disk cache 96 ms (8.1x speedup)
 
-NVIDIA DRIVE CX (driver 367.00)
+** Intel HD on Windows ** (Surface Pro 3)
+
+10 shaders - standard compilation 59 ms - subsequent runs with Qt's disk cache 13 ms (4.5x speedup)
+
+100 shaders - standard compilation 427 ms - subsequent runs with Qt's disk cache 51 ms (8.3x speedup)
+
+** NVIDIA DRIVE CX ** (driver 367.00, built-in disk cache)
 
 10 shaders - first compilation 8 ms - subsequent runs with driver's cache 8 ms - subsequent runs with Qt's disk cache on top 5 ms (1.6x speedup)
 
 100 shaders - first compilation 693 ms - subsequent runs with driver's cache 51 ms - subsequent runs with Qt's disk cache on top 27 ms (1.8x speedup (25.6x with __GL_SHADER_DISK_CACHE=0))
+
+** Mesa **
+
+Not supported. Even though GL_ARB_get_program_binary is advertised / OpenGL ES
+3.0 is supported, the number of supported binary formats is 0. So no speedup
+here.
