@@ -44,6 +44,11 @@
 #include <QDir>
 #include <QLoggingCategory>
 
+#ifdef Q_OS_UNIX
+#include <sys/mman.h>
+#include <private/qcore_unix_p.h>
+#endif
+
 QT_BEGIN_NAMESPACE
 
 Q_DECLARE_LOGGING_CATEGORY(DBG_SHADER_CACHE)
@@ -54,7 +59,7 @@ Q_DECLARE_LOGGING_CATEGORY(DBG_SHADER_CACHE)
 
 // all of QOpenGLProgramBinaryCache must be thread-safe
 
-const quint32 BINSHADER_MAGIC = 0x9604;
+const quint32 BINSHADER_MAGIC = 0x5174;
 const quint32 BINSHADER_VERSION = 0x1;
 const quint32 BINSHADER_QTVERSION = QT_VERSION;
 
@@ -96,35 +101,117 @@ QString QOpenGLProgramBinaryCache::cacheFileName(const QByteArray &cacheKey) con
     return m_cacheDir + QString::fromUtf8(cacheKey);
 }
 
-bool QOpenGLProgramBinaryCache::load(const QByteArray &cacheKey, uint programId)
-{
-    QFile f(cacheFileName(cacheKey)); // ### switch to mmap on unix
-    if (!f.open(QIODevice::ReadOnly))
-        return false;
-    QByteArray buf = f.readAll();
-    f.close();
+static const int HEADER_SIZE = 3 * sizeof(quint32);
 
-    if (buf.size() < 12 + 12 + 8) {
+bool QOpenGLProgramBinaryCache::verifyHeader(const QByteArray &buf) const
+{
+    if (buf.size() < HEADER_SIZE) {
         qCDebug(DBG_SHADER_CACHE, "Cached size too small");
-        f.remove();
         return false;
     }
     const quint32 *p = reinterpret_cast<const quint32 *>(buf.constData());
     if (*p++ != BINSHADER_MAGIC) {
         qCDebug(DBG_SHADER_CACHE, "Magic does not match");
-        f.remove();
         return false;
     }
     if (*p++ != BINSHADER_VERSION) {
         qCDebug(DBG_SHADER_CACHE, "Version does not match");
-        f.remove();
         return false;
     }
     if (*p++ != BINSHADER_QTVERSION) {
         qCDebug(DBG_SHADER_CACHE, "Qt version does not match");
-        f.remove();
         return false;
     }
+    return true;
+}
+
+#ifdef Q_OS_UNIX
+class FdWrapper
+{
+public:
+    FdWrapper(const QString &fn)
+        : ptr(MAP_FAILED)
+    {
+        fd = qt_safe_open(QFile::encodeName(fn).constData(), O_RDONLY);
+    }
+    ~FdWrapper()
+    {
+        if (ptr != MAP_FAILED)
+            munmap(ptr, mapSize);
+        if (fd != -1)
+            qt_safe_close(fd);
+    }
+    bool map()
+    {
+        mapSize = static_cast<size_t>(lseek(fd, 0, SEEK_END));
+        ptr = mmap(nullptr, mapSize, PROT_READ, MAP_SHARED, fd, 0);
+        return ptr != MAP_FAILED;
+    }
+
+    int fd;
+    void *ptr;
+    size_t mapSize;
+};
+#endif
+
+class DeferredFileRemove
+{
+public:
+    DeferredFileRemove(const QString &fn)
+        : fn(fn),
+          active(false)
+    {
+    }
+    ~DeferredFileRemove()
+    {
+        if (active)
+            QFile(fn).remove();
+    }
+    void setActive()
+    {
+        active = true;
+    }
+
+    QString fn;
+    bool active;
+};
+
+bool QOpenGLProgramBinaryCache::load(const QByteArray &cacheKey, uint programId)
+{
+    QByteArray buf;
+    const QString fn = cacheFileName(cacheKey);
+    DeferredFileRemove undertaker(fn);
+#ifdef Q_OS_UNIX
+    FdWrapper fdw(fn);
+    if (fdw.fd == -1)
+        return false;
+    char header[HEADER_SIZE];
+    qint64 bytesRead = qt_safe_read(fdw.fd, header, HEADER_SIZE);
+    if (bytesRead == HEADER_SIZE)
+        buf = QByteArray::fromRawData(header, HEADER_SIZE);
+#else
+    QFile f(fn);
+    if (!f.open(QIODevice::ReadOnly))
+        return false;
+    buf = f.readAll();
+    f.close();
+#endif
+
+    if (!verifyHeader(buf)) {
+        undertaker.setActive();
+        return false;
+    }
+
+    const quint32 *p;
+#ifdef Q_OS_UNIX
+    if (!fdw.map()) {
+        undertaker.setActive();
+        return false;
+    }
+    p = reinterpret_cast<const quint32 *>(static_cast<const char *>(fdw.ptr) + HEADER_SIZE);
+#else
+    p = reinterpret_cast<const quint32 *>(buf.constData() + HEADER_SIZE);
+#endif
 
     BinCacheCommon b;
 
@@ -132,7 +219,7 @@ bool QOpenGLProgramBinaryCache::load(const QByteArray &cacheKey, uint programId)
     QByteArray vendor = QByteArray::fromRawData(reinterpret_cast<const char *>(p), v);
     if (vendor != b.glvendor) {
         qCDebug(DBG_SHADER_CACHE, "GL_VENDOR does not match (%s, %s)", qPrintable(vendor), qPrintable(b.glvendor));
-        f.remove();
+        undertaker.setActive();
         return false;
     }
     p = reinterpret_cast<const quint32 *>(reinterpret_cast<const char *>(p) + v);
@@ -140,7 +227,7 @@ bool QOpenGLProgramBinaryCache::load(const QByteArray &cacheKey, uint programId)
     QByteArray renderer = QByteArray::fromRawData(reinterpret_cast<const char *>(p), v);
     if (renderer != b.glrenderer) {
         qCDebug(DBG_SHADER_CACHE, "GL_RENDERER does not match (%s, %s)", qPrintable(renderer), qPrintable(b.glrenderer));
-        f.remove();
+        undertaker.setActive();
         return false;
     }
     p = reinterpret_cast<const quint32 *>(reinterpret_cast<const char *>(p) + v);
@@ -148,7 +235,7 @@ bool QOpenGLProgramBinaryCache::load(const QByteArray &cacheKey, uint programId)
     QByteArray version = QByteArray::fromRawData(reinterpret_cast<const char *>(p), v);
     if (version != b.glversion) {
         qCDebug(DBG_SHADER_CACHE, "GL_VERSION does not match (%s, %s)", qPrintable(version), qPrintable(b.glversion));
-        f.remove();
+        undertaker.setActive();
         return false;
     }
     p = reinterpret_cast<const quint32 *>(reinterpret_cast<const char *>(p) + v);

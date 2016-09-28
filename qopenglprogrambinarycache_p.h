@@ -63,6 +63,7 @@ public:
 
 private:
     QString cacheFileName(const QByteArray &cacheKey) const;
+    bool verifyHeader(const QByteArray &buf) const;
 
     QString m_cacheDir;
     bool m_cacheWritable;
