@@ -63,16 +63,16 @@ const quint32 BINSHADER_MAGIC = 0x5174;
 const quint32 BINSHADER_VERSION = 0x1;
 const quint32 BINSHADER_QTVERSION = QT_VERSION;
 
-struct BinCacheCommon
+struct GLEnvInfo
 {
-    BinCacheCommon();
+    GLEnvInfo();
 
     QByteArray glvendor;
     QByteArray glrenderer;
     QByteArray glversion;
 };
 
-BinCacheCommon::BinCacheCommon()
+GLEnvInfo::GLEnvInfo()
 {
     QOpenGLContext *ctx = QOpenGLContext::currentContext();
     Q_ASSERT(ctx);
@@ -229,28 +229,28 @@ bool QOpenGLProgramBinaryCache::load(const QByteArray &cacheKey, uint programId)
     p = reinterpret_cast<const quint32 *>(buf.constData());
 #endif
 
-    BinCacheCommon b;
+    GLEnvInfo info;
 
     quint32 v = *p++;
     QByteArray vendor = QByteArray::fromRawData(reinterpret_cast<const char *>(p), v);
-    if (vendor != b.glvendor) {
-        qCDebug(DBG_SHADER_CACHE, "GL_VENDOR does not match (%s, %s)", qPrintable(vendor), qPrintable(b.glvendor));
+    if (vendor != info.glvendor) {
+        qCDebug(DBG_SHADER_CACHE, "GL_VENDOR does not match (%s, %s)", qPrintable(vendor), qPrintable(info.glvendor));
         undertaker.setActive();
         return false;
     }
     p = reinterpret_cast<const quint32 *>(reinterpret_cast<const char *>(p) + v);
     v = *p++;
     QByteArray renderer = QByteArray::fromRawData(reinterpret_cast<const char *>(p), v);
-    if (renderer != b.glrenderer) {
-        qCDebug(DBG_SHADER_CACHE, "GL_RENDERER does not match (%s, %s)", qPrintable(renderer), qPrintable(b.glrenderer));
+    if (renderer != info.glrenderer) {
+        qCDebug(DBG_SHADER_CACHE, "GL_RENDERER does not match (%s, %s)", qPrintable(renderer), qPrintable(info.glrenderer));
         undertaker.setActive();
         return false;
     }
     p = reinterpret_cast<const quint32 *>(reinterpret_cast<const char *>(p) + v);
     v = *p++;
     QByteArray version = QByteArray::fromRawData(reinterpret_cast<const char *>(p), v);
-    if (version != b.glversion) {
-        qCDebug(DBG_SHADER_CACHE, "GL_VERSION does not match (%s, %s)", qPrintable(version), qPrintable(b.glversion));
+    if (version != info.glversion) {
+        qCDebug(DBG_SHADER_CACHE, "GL_VERSION does not match (%s, %s)", qPrintable(version), qPrintable(info.glversion));
         undertaker.setActive();
         return false;
     }
@@ -271,13 +271,13 @@ void QOpenGLProgramBinaryCache::save(const QByteArray &cacheKey, uint programId)
     if (!m_cacheWritable)
         return;
 
-    BinCacheCommon b;
+    GLEnvInfo info;
 
     QOpenGLExtraFunctions *funcs = QOpenGLContext::currentContext()->extraFunctions();
     GLint blobSize = 0;
     funcs->glGetError();
     funcs->glGetProgramiv(programId, GL_PROGRAM_BINARY_LENGTH, &blobSize);
-    int totalSize = blobSize + 8 + 12 + 12 + b.glvendor.count() + b.glrenderer.count() + b.glversion.count();
+    int totalSize = blobSize + 8 + 12 + 12 + info.glvendor.count() + info.glrenderer.count() + info.glversion.count();
     qCDebug(DBG_SHADER_CACHE, "Program binary is %d bytes, err = 0x%x, total %d", blobSize, funcs->glGetError(), totalSize);
     if (!blobSize)
         return;
@@ -290,15 +290,15 @@ void QOpenGLProgramBinaryCache::save(const QByteArray &cacheKey, uint programId)
     *p++ = BINSHADER_VERSION;
     *p++ = BINSHADER_QTVERSION;
 
-    *p++ = b.glvendor.count();
-    memcpy(p, b.glvendor.constData(), b.glvendor.count());
-    p = reinterpret_cast<quint32 *>(reinterpret_cast<char *>(p) + b.glvendor.count());
-    *p++ = b.glrenderer.count();
-    memcpy(p, b.glrenderer.constData(), b.glrenderer.count());
-    p = reinterpret_cast<quint32 *>(reinterpret_cast<char *>(p) + b.glrenderer.count());
-    *p++ = b.glversion.count();
-    memcpy(p, b.glversion.constData(), b.glversion.count());
-    p = reinterpret_cast<quint32 *>(reinterpret_cast<char *>(p) + b.glversion.count());
+    *p++ = info.glvendor.count();
+    memcpy(p, info.glvendor.constData(), info.glvendor.count());
+    p = reinterpret_cast<quint32 *>(reinterpret_cast<char *>(p) + info.glvendor.count());
+    *p++ = info.glrenderer.count();
+    memcpy(p, info.glrenderer.constData(), info.glrenderer.count());
+    p = reinterpret_cast<quint32 *>(reinterpret_cast<char *>(p) + info.glrenderer.count());
+    *p++ = info.glversion.count();
+    memcpy(p, info.glversion.constData(), info.glversion.count());
+    p = reinterpret_cast<quint32 *>(reinterpret_cast<char *>(p) + info.glversion.count());
         
     quint32 blobFormat = 0;
     GLint outSize = 0;
